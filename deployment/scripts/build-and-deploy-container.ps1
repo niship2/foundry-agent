@@ -86,7 +86,7 @@ if ($dockerAvailable) {
         docker build `
             --build-arg ENTRA_SPA_CLIENT_ID=$ClientId `
             --build-arg ENTRA_TENANT_ID=$TenantId `
-            -f .\deployment\docker\frontend.Dockerfile `
+            -f ./deployment/docker/frontend.Dockerfile `
             -t $imageName `
             . 2>&1 | Out-Host
 
@@ -131,7 +131,7 @@ if ($dockerAvailable) {
             --image "ai-foundry-agent/web-dev:$imageTag" `
             --build-arg ENTRA_SPA_CLIENT_ID=$ClientId `
             --build-arg ENTRA_TENANT_ID=$TenantId `
-            --file .\deployment\docker\frontend.Dockerfile `
+            --file ./deployment/docker/frontend.Dockerfile `
             --no-logs `
             . 2>&1
         
