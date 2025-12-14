@@ -3,6 +3,7 @@ using Microsoft.Identity.Web;
 using WebApp.Api.Models;
 using WebApp.Api.Services;
 using System.Security.Claims;
+using System.Runtime.CompilerServices;
 
 // Load .env file for local development BEFORE building the configuration
 // In production (Docker), Container Apps injects environment variables directly
@@ -126,6 +127,12 @@ builder.Services.AddAuthorization(options =>
 // and avoid potential issues with long-lived connections
 builder.Services.AddScoped<WebApp.Api.Services.AzureAIAgentService>();
 
+// Register Agent Management Service as scoped for agent discovery
+builder.Services.AddScoped<WebApp.Api.Services.AgentManagementService>();
+
+// Register Agent Factory as singleton for efficient agent instance management
+builder.Services.AddSingleton<WebApp.Api.Services.IAzureAIAgentFactory, WebApp.Api.Services.AzureAIAgentFactory>();
+
 var app = builder.Build();
 
 // Add exception handling middleware for production
@@ -180,6 +187,10 @@ app.MapPost("/api/chat/stream", async (
 {
     try
     {
+        // Log that the default (non-agent-specific) endpoint is being used
+        var logger = httpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+        logger.LogInformation("Chat request to default endpoint (not agent-specific)");
+        
         httpContext.Response.Headers.Append("Content-Type", "text/event-stream");
         httpContext.Response.Headers.Append("Cache-Control", "no-cache");
         httpContext.Response.Headers.Append("Connection", "keep-alive");
@@ -349,6 +360,147 @@ app.MapGet("/api/agent/info", async (
 })
 .RequireAuthorization(ScopePolicyName)
 .WithName("GetAgentInfo");
+
+// Get all available agents
+app.MapGet("/api/agents", async (
+    AgentManagementService agentManagementService,
+    IHostEnvironment environment,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var agents = await agentManagementService.GetAvailableAgentsAsync(cancellationToken);
+        return Results.Ok(new
+        {
+            agents = agents.ToArray(),
+            count = agents.Count()
+        });
+    }
+    catch (Exception ex)
+    {
+        var errorResponse = ErrorResponseFactory.CreateFromException(
+            ex, 
+            500, 
+            environment.IsDevelopment());
+        
+        return Results.Problem(
+            title: errorResponse.Title,
+            detail: errorResponse.Detail,
+            statusCode: errorResponse.Status,
+            extensions: errorResponse.Extensions
+        );
+    }
+})
+.RequireAuthorization(ScopePolicyName)
+.WithName("GetAvailableAgents");
+
+// Get specific agent metadata by ID
+app.MapGet("/api/agents/{agentId}", async (
+    string agentId,
+    AgentManagementService agentManagementService,
+    IHostEnvironment environment,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var agent = await agentManagementService.GetAgentByIdAsync(agentId, cancellationToken);
+        return Results.Ok(agent);
+    }
+    catch (Exception ex)
+    {
+        var errorResponse = ErrorResponseFactory.CreateFromException(
+            ex, 
+            500, 
+            environment.IsDevelopment());
+        
+        return Results.Problem(
+            title: errorResponse.Title,
+            detail: errorResponse.Detail,
+            statusCode: errorResponse.Status,
+            extensions: errorResponse.Extensions
+        );
+    }
+})
+.RequireAuthorization(ScopePolicyName)
+.WithName("GetAgentById");
+
+// Chat with specific agent (using agent factory)
+app.MapPost("/api/agents/{agentId}/chat/stream", async (
+    string agentId,
+    ChatRequest request,
+    IAzureAIAgentFactory agentFactory,
+    HttpContext httpContext,
+    IHostEnvironment environment,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        // Log the specific agent being requested
+        var logger = httpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+        logger.LogInformation("Chat request for specific agent: {AgentId}", agentId);
+        
+        // Create agent service instance for the specific agent
+        var agentService = agentFactory.CreateAgent(agentId);
+        
+        httpContext.Response.Headers.Append("Content-Type", "text/event-stream");
+        httpContext.Response.Headers.Append("Cache-Control", "no-cache");
+        httpContext.Response.Headers.Append("Connection", "keep-alive");
+
+        var conversationId = request.ConversationId
+            ?? await agentService.CreateConversationAsync(request.Message, cancellationToken);
+
+        // Same streaming logic as main endpoint
+        await WriteConversationIdEvent(httpContext.Response, conversationId, cancellationToken);
+
+        var startTime = DateTime.UtcNow;
+
+        await foreach (var chunk in agentService.StreamMessageAsync(
+            conversationId,
+            request.Message,
+            request.ImageDataUris,
+            cancellationToken))
+        {
+            await WriteChunkEvent(httpContext.Response, chunk, cancellationToken);
+        }
+
+        var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+        var usage = await agentService.GetLastRunUsageAsync(cancellationToken);
+
+        if (usage != null)
+        {
+            await WriteUsageEvent(httpContext.Response, new
+            {
+                duration,
+                promptTokens = usage.PromptTokens,
+                completionTokens = usage.CompletionTokens,
+                totalTokens = usage.TotalTokens
+            }, cancellationToken);
+        }
+
+        await WriteDoneEvent(httpContext.Response, cancellationToken);
+
+        // Note: We don't release the agent here to keep it cached for subsequent requests
+        // The factory manages the lifecycle
+        
+        return Results.Empty;
+    }
+    catch (Exception ex)
+    {
+        var errorResponse = ErrorResponseFactory.CreateFromException(
+            ex, 
+            500, 
+            environment.IsDevelopment());
+        
+        return Results.Problem(
+            title: errorResponse.Title,
+            detail: errorResponse.Detail,
+            statusCode: errorResponse.Status,
+            extensions: errorResponse.Extensions
+        );
+    }
+})
+.RequireAuthorization(ScopePolicyName)
+.WithName("ChatWithSpecificAgent");
 
 // Fallback route for SPA - serve index.html for any non-API routes
 app.MapFallbackToFile("index.html");

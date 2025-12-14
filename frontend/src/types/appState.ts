@@ -1,6 +1,6 @@
-import type { AccountInfo } from '@azure/msal-browser';
-import type { IChatItem, IUsageInfo } from './chat';
-import type { AppError } from './errors';
+import type { AccountInfo } from "@azure/msal-browser";
+import type { IChatItem, IUsageInfo } from "./chat";
+import type { AppError } from "./errors";
 
 // Re-export types for convenience
 export type { IChatItem, IUsageInfo };
@@ -12,20 +12,21 @@ export type { IChatItem, IUsageInfo };
 export interface AppState {
   // Authentication state
   auth: {
-    status: 'initializing' | 'authenticated' | 'unauthenticated' | 'error';
+    status: "initializing" | "authenticated" | "unauthenticated" | "error";
     user: AccountInfo | null;
     error: string | null;
   };
-  
+
   // Chat operations state
   chat: {
-    status: 'idle' | 'sending' | 'streaming' | 'error';
+    status: "idle" | "sending" | "streaming" | "error";
     messages: IChatItem[];
     currentConversationId: string | null;
+    selectedAgentId: string | null; // Currently selected agent
     error: AppError | null; // Enhanced error object
     streamingMessageId?: string; // Which message is actively streaming
   };
-  
+
   // UI coordination state
   ui: {
     chatInputEnabled: boolean; // Disable during streaming/errors
@@ -36,35 +37,37 @@ export interface AppState {
  * All possible actions that can modify application state
  * Use discriminated unions for type safety
  */
-export type AppAction = 
+export type AppAction =
   // Auth actions
-  | { type: 'AUTH_INITIALIZED'; user: AccountInfo }
-  | { type: 'AUTH_TOKEN_EXPIRED' }
-  
+  | { type: "AUTH_INITIALIZED"; user: AccountInfo }
+  | { type: "AUTH_TOKEN_EXPIRED" }
+
   // Chat actions
-  | { type: 'CHAT_SEND_MESSAGE'; message: IChatItem }
-  | { type: 'CHAT_START_STREAM'; conversationId?: string; messageId: string }
-  | { type: 'CHAT_STREAM_CHUNK'; messageId: string; content: string }
-  | { type: 'CHAT_STREAM_COMPLETE'; usage: IUsageInfo }
-  | { type: 'CHAT_CANCEL_STREAM' }
-  | { type: 'CHAT_ERROR'; error: AppError } // Enhanced error object
-  | { type: 'CHAT_CLEAR_ERROR' } // Clear error state
-  | { type: 'CHAT_CLEAR' }
-  | { type: 'CHAT_ADD_ASSISTANT_MESSAGE'; messageId: string };
+  | { type: "CHAT_SEND_MESSAGE"; message: IChatItem }
+  | { type: "CHAT_START_STREAM"; conversationId?: string; messageId: string }
+  | { type: "CHAT_STREAM_CHUNK"; messageId: string; content: string }
+  | { type: "CHAT_STREAM_COMPLETE"; usage: IUsageInfo }
+  | { type: "CHAT_CANCEL_STREAM" }
+  | { type: "CHAT_ERROR"; error: AppError } // Enhanced error object
+  | { type: "CHAT_CLEAR_ERROR" } // Clear error state
+  | { type: "CHAT_CLEAR" }
+  | { type: "CHAT_ADD_ASSISTANT_MESSAGE"; messageId: string }
+  | { type: "CHAT_SELECT_AGENT"; agentId: string | null };
 
 /**
  * Initial state for the application
  */
 export const initialAppState: AppState = {
   auth: {
-    status: 'initializing',
+    status: "initializing",
     user: null,
     error: null,
   },
   chat: {
-    status: 'idle',
+    status: "idle",
     messages: [],
     currentConversationId: null,
+    selectedAgentId: null,
     error: null,
     streamingMessageId: undefined,
   },

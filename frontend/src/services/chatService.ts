@@ -1,7 +1,7 @@
-import type { Dispatch } from 'react';
-import type { AppAction } from '../types/appState';
-import type { IChatItem } from '../types/chat';
-import type { AppError } from '../types/errors';
+import type { Dispatch } from "react";
+import type { AppAction } from "../types/appState";
+import type { IChatItem } from "../types/chat";
+import type { AppError } from "../types/errors";
 import {
   createAppError,
   getErrorCodeFromMessage,
@@ -9,17 +9,17 @@ import {
   getErrorCodeFromResponse,
   isTokenExpiredError,
   retryWithBackoff,
-} from '../utils/errorHandler';
+} from "../utils/errorHandler";
 import {
   convertFilesToDataUris,
   createAttachmentMetadata,
-} from '../utils/fileAttachments';
-import { parseSseLine, splitSseBuffer } from '../utils/sseParser';
+} from "../utils/fileAttachments";
+import { parseSseLine, splitSseBuffer } from "../utils/sseParser";
 
 /**
  * ChatService handles all chat-related API operations.
  * Dispatches AppContext actions for state management.
- * 
+ *
  * @example
  * ```typescript
  * const chatService = new ChatService(
@@ -27,7 +27,7 @@ import { parseSseLine, splitSseBuffer } from '../utils/sseParser';
  *   getAccessToken,
  *   dispatch
  * );
- * 
+ *
  * // Send a message with images
  * await chatService.sendMessage(
  *   'Analyze this image',
@@ -57,14 +57,14 @@ export class ChatService {
   /**
    * Acquire authentication token using MSAL.
    * Attempts silent acquisition first, falls back to popup if needed.
-   * 
+   *
    * @returns Access token string
    * @throws {Error} If token acquisition fails
    */
   private async ensureAuthToken(): Promise<string> {
     const token = await this.getAccessToken();
     if (!token) {
-      throw createAppError(new Error('Failed to acquire access token'), 'AUTH');
+      throw createAppError(new Error("Failed to acquire access token"), "AUTH");
     }
     return token;
   }
@@ -72,7 +72,7 @@ export class ChatService {
   /**
    * Prepare message payload with optional file attachments.
    * Converts files to data URIs and creates attachment metadata.
-   * 
+   *
    * @param text - Message text content
    * @param files - Optional array of image files
    * @returns Payload with content, data URIs, and attachment metadata
@@ -83,10 +83,10 @@ export class ChatService {
   ): Promise<{
     content: string;
     imageDataUris: string[];
-    attachments: IChatItem['attachments'];
+    attachments: IChatItem["attachments"];
   }> {
     let imageDataUris: string[] = [];
-    let attachments: IChatItem['attachments'] = undefined;
+    let attachments: IChatItem["attachments"] = undefined;
 
     if (files && files.length > 0) {
       try {
@@ -95,7 +95,7 @@ export class ChatService {
         attachments = createAttachmentMetadata(results);
       } catch (error) {
         const appError = createAppError(error);
-        this.dispatch({ type: 'CHAT_ERROR', error: appError });
+        this.dispatch({ type: "CHAT_ERROR", error: appError });
         throw appError;
       }
     }
@@ -105,7 +105,7 @@ export class ChatService {
 
   /**
    * Construct request body for chat API.
-   * 
+   *
    * @param message - User message text
    * @param conversationId - Current conversation ID (null for new conversations)
    * @param imageDataUris - Array of base64 data URIs for images
@@ -126,7 +126,7 @@ export class ChatService {
   /**
    * Initiate streaming fetch request to chat API.
    * Validates response and throws typed errors on failure.
-   * 
+   *
    * @param url - API endpoint URL
    * @param token - Access token
    * @param body - Request body
@@ -141,19 +141,23 @@ export class ChatService {
     signal: AbortSignal
   ): Promise<Response> {
     const res = await fetch(url, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(body),
       signal,
     });
 
-    console.log(`[ChatService] Response status: ${res.status} ${res.statusText}`);
+    console.log(
+      `[ChatService] Response status: ${res.status} ${res.statusText}`
+    );
 
     if (!res.ok) {
-      console.error(`[ChatService] Response not OK: ${res.status} ${res.statusText}`);
+      console.error(
+        `[ChatService] Response not OK: ${res.status} ${res.statusText}`
+      );
       const errorMessage = await parseErrorFromResponse(res);
       const errorCode = getErrorCodeFromResponse(res);
       throw createAppError(new Error(errorMessage), errorCode);
@@ -165,12 +169,13 @@ export class ChatService {
   /**
    * Send a message and stream the response from the Azure AI Agent.
    * Orchestrates authentication, file conversion, optimistic UI updates, and streaming.
-   * 
+   *
    * @param messageText - The user's message text
    * @param currentConversationId - Current conversation ID (null for new conversations)
    * @param files - Optional array of image files to attach
+   * @param selectedAgentId - Optional agent ID to use for this message
    * @throws {Error} If authentication fails or API request fails
-   * 
+   *
    * @remarks
    * Token acquisition: Attempts acquireTokenSilent first, falls back to acquireTokenPopup.
    * Retries failed requests up to 3 times with exponential backoff.
@@ -178,24 +183,23 @@ export class ChatService {
   async sendMessage(
     messageText: string,
     currentConversationId: string | null,
-    files?: File[]
+    files?: File[],
+    selectedAgentId?: string | null
   ): Promise<void> {
     if (this.currentStreamAbort) {
       this.streamCancelled = true;
       this.currentStreamAbort.abort();
-      this.dispatch({ type: 'CHAT_CANCEL_STREAM' });
+      this.dispatch({ type: "CHAT_CANCEL_STREAM" });
     }
 
     try {
       const token = await this.ensureAuthToken();
-      const { content, imageDataUris, attachments } = await this.prepareMessagePayload(
-        messageText,
-        files
-      );
+      const { content, imageDataUris, attachments } =
+        await this.prepareMessagePayload(messageText, files);
 
       const userMessage: IChatItem = {
         id: Date.now().toString(),
-        role: 'user',
+        role: "user",
         content,
         attachments,
         more: {
@@ -203,12 +207,15 @@ export class ChatService {
         },
       };
 
-      this.dispatch({ type: 'CHAT_SEND_MESSAGE', message: userMessage });
+      this.dispatch({ type: "CHAT_SEND_MESSAGE", message: userMessage });
 
       const assistantMessageId = (Date.now() + 1).toString();
-      this.dispatch({ type: 'CHAT_ADD_ASSISTANT_MESSAGE', messageId: assistantMessageId });
       this.dispatch({
-        type: 'CHAT_START_STREAM',
+        type: "CHAT_ADD_ASSISTANT_MESSAGE",
+        messageId: assistantMessageId,
+      });
+      this.dispatch({
+        type: "CHAT_START_STREAM",
         conversationId: currentConversationId || undefined,
         messageId: assistantMessageId,
       });
@@ -222,10 +229,26 @@ export class ChatService {
         imageDataUris
       );
 
+      // Choose endpoint based on whether a specific agent is selected
+      const endpoint = selectedAgentId
+        ? `${this.apiUrl}/agents/${selectedAgentId}/chat/stream`
+        : `${this.apiUrl}/chat/stream`;
+
+      // Debug: Log the endpoint and agent selection (v3 - 2025-12-14 08:55)
+      console.log(
+        `[ChatService v3] Using endpoint: ${endpoint}, selectedAgentId: ${selectedAgentId}`
+      );
+      console.log(`[ChatService v3] Full context:`, {
+        selectedAgentId,
+        endpoint,
+        apiUrl: this.apiUrl,
+        messageText: messageText.substring(0, 50),
+      });
+
       const response = await retryWithBackoff(
         async () =>
           this.initiateStream(
-            `${this.apiUrl}/chat/stream`,
+            endpoint,
             token,
             requestBody,
             this.currentStreamAbort!.signal
@@ -234,34 +257,36 @@ export class ChatService {
         1000
       );
 
-      await this.processStream(response, assistantMessageId, currentConversationId);
+      await this.processStream(
+        response,
+        assistantMessageId,
+        currentConversationId
+      );
       this.currentStreamAbort = undefined;
       this.streamCancelled = false;
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
+      if (error instanceof DOMException && error.name === "AbortError") {
         return;
       }
 
       if (isTokenExpiredError(error)) {
-        this.dispatch({ type: 'AUTH_TOKEN_EXPIRED' });
+        this.dispatch({ type: "AUTH_TOKEN_EXPIRED" });
       }
 
       const isAppError =
         error &&
-        typeof error === 'object' &&
-        'code' in error &&
-        'message' in error &&
-        'recoverable' in error;
+        typeof error === "object" &&
+        "code" in error &&
+        "message" in error &&
+        "recoverable" in error;
 
       const appError: AppError = isAppError
         ? (error as AppError)
-        : createAppError(
-            error,
-            getErrorCodeFromMessage(error),
-            () => this.sendMessage(messageText, currentConversationId, files)
+        : createAppError(error, getErrorCodeFromMessage(error), () =>
+            this.sendMessage(messageText, currentConversationId, files)
           );
 
-      this.dispatch({ type: 'CHAT_ERROR', error: appError });
+      this.dispatch({ type: "CHAT_ERROR", error: appError });
       throw error;
     }
   }
@@ -269,7 +294,7 @@ export class ChatService {
   /**
    * Process Server-Sent Events stream from the API.
    * Implements duplicate chunk suppression to prevent UI flicker.
-   * 
+   *
    * @param response - Fetch Response object with SSE stream
    * @param messageId - ID of the assistant message being streamed
    * @param currentConversationId - Current conversation ID (null for new conversations)
@@ -286,15 +311,15 @@ export class ChatService {
     if (!reader) {
       const error = createAppError(
         new Error(`Response body is not readable for message ${messageId}`),
-        'STREAM'
+        "STREAM"
       );
-      this.dispatch({ type: 'CHAT_ERROR', error });
+      this.dispatch({ type: "CHAT_ERROR", error });
       throw error;
     }
 
     let newConversationId = currentConversationId;
     let lastChunkContent: string | undefined;
-    let buffer = '';
+    let buffer = "";
 
     try {
       while (true) {
@@ -316,31 +341,38 @@ export class ChatService {
           if (!event) continue;
 
           if (event.data?.error) {
-            console.error('[ChatService] SSE error event received:', event.data.error);
-            const error = createAppError(
-              new Error(event.data.error.message || event.data.error || 'Stream error occurred'),
-              'STREAM'
+            console.error(
+              "[ChatService] SSE error event received:",
+              event.data.error
             );
-            this.dispatch({ type: 'CHAT_ERROR', error });
+            const error = createAppError(
+              new Error(
+                event.data.error.message ||
+                  event.data.error ||
+                  "Stream error occurred"
+              ),
+              "STREAM"
+            );
+            this.dispatch({ type: "CHAT_ERROR", error });
             throw error;
           }
 
           switch (event.type) {
-            case 'conversationId':
+            case "conversationId":
               if (!newConversationId) {
                 newConversationId = event.data.conversationId;
                 this.dispatch({
-                  type: 'CHAT_START_STREAM',
+                  type: "CHAT_START_STREAM",
                   conversationId: event.data.conversationId,
                   messageId,
                 });
               }
               break;
 
-            case 'chunk':
+            case "chunk":
               if (event.data.content !== lastChunkContent) {
                 this.dispatch({
-                  type: 'CHAT_STREAM_CHUNK',
+                  type: "CHAT_STREAM_CHUNK",
                   messageId,
                   content: event.data.content,
                 });
@@ -348,9 +380,9 @@ export class ChatService {
               }
               break;
 
-            case 'usage':
+            case "usage":
               this.dispatch({
-                type: 'CHAT_STREAM_COMPLETE',
+                type: "CHAT_STREAM_COMPLETE",
                 usage: {
                   promptTokens: event.data.promptTokens,
                   completionTokens: event.data.completionTokens,
@@ -360,40 +392,48 @@ export class ChatService {
               });
               break;
 
-            case 'done':
+            case "done":
               return;
 
-            case 'error':
+            case "error":
               const error = createAppError(
-                new Error(`Stream error for message ${messageId}: ${event.data.message}`),
-                'STREAM'
+                new Error(
+                  `Stream error for message ${messageId}: ${event.data.message}`
+                ),
+                "STREAM"
               );
-              this.dispatch({ type: 'CHAT_ERROR', error });
+              this.dispatch({ type: "CHAT_ERROR", error });
               throw error;
           }
         }
       }
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError' && this.streamCancelled) {
-        console.log('[ChatService] Stream intentionally cancelled by user');
+      if (
+        error instanceof DOMException &&
+        error.name === "AbortError" &&
+        this.streamCancelled
+      ) {
+        console.log("[ChatService] Stream intentionally cancelled by user");
         return;
       }
 
-      console.error('[ChatService] Stream processing error:', error, {
+      console.error("[ChatService] Stream processing error:", error, {
         conversationId: currentConversationId,
         messageId,
       });
 
       const appError =
-        error instanceof Error && 'code' in error
+        error instanceof Error && "code" in error
           ? error
           : createAppError(
               new Error(
-                `Stream processing failed: ${error instanceof Error ? error.message : String(error)} (Conversation: ${currentConversationId}, Message: ${messageId})`
+                `Stream processing failed: ${
+                  error instanceof Error ? error.message : String(error)
+                } (Conversation: ${currentConversationId}, Message: ${messageId})`
               ),
-              'STREAM'
+              "STREAM"
             );
-      this.dispatch({ type: 'CHAT_ERROR', error: appError as AppError });
+      this.dispatch({ type: "CHAT_ERROR", error: appError as AppError });
       throw error;
     } finally {
       try {
@@ -409,7 +449,7 @@ export class ChatService {
    * Dispatches CHAT_CLEAR action to remove all messages and conversation ID.
    */
   clearChat(): void {
-    this.dispatch({ type: 'CHAT_CLEAR' });
+    this.dispatch({ type: "CHAT_CLEAR" });
   }
 
   /**
@@ -417,7 +457,7 @@ export class ChatService {
    * Dispatches CHAT_CLEAR_ERROR action.
    */
   clearError(): void {
-    this.dispatch({ type: 'CHAT_CLEAR_ERROR' });
+    this.dispatch({ type: "CHAT_CLEAR_ERROR" });
   }
 
   /**
@@ -429,8 +469,8 @@ export class ChatService {
     if (this.currentStreamAbort) {
       this.streamCancelled = true;
       this.currentStreamAbort.abort();
-      console.log('[ChatService] Stream cancellation requested');
-      this.dispatch({ type: 'CHAT_CANCEL_STREAM' });
+      console.log("[ChatService] Stream cancellation requested");
+      this.dispatch({ type: "CHAT_CANCEL_STREAM" });
     }
   }
 }
